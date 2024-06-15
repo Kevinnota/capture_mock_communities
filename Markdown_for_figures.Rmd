@@ -43,7 +43,7 @@ path_to_file_dir='/Volumes/expressions/kevin_nota/001_capture_project/data_analy
 The code below generates Figure 2. It processes data from the directories 'ngsLCA_files.zip' and 'best_hit_mapping_summary.zip'. The script takes the .lca files produced by ngsLCA, extracting only the columns for readname, taxa, mix_id, marker, and read name. All samples are combined into a single dataset. Additional columns, such as read length, GC content bins, and dataset type (capture or shotgun), are then added. The data is summarized and plotted using ggplot.
 
 ```{r}
-path = "/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/ngsLCA_assignment/"
+path = "path to ngsLCA_assignment/"
 files <- grep("MIX.*.lca$", list.files(path), value = T)
 lca_table_total.dt = data.table()
 for( file in files){
@@ -103,7 +103,7 @@ GC_read_shotgun <- merge(lca_table_total.dt[dataset=='shotgun', .(shotgun_read_c
 GC_read_shotgun[,relative_change := (capture_read_count-shotgun_read_count)/shotgun_read_count]
 GC_read_shotgun[,max_value := pmax(capture_read_count, shotgun_read_count)]
 
-PATH="/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/best_hit_mapping_summary/"
+PATH="Path to best_hit_mapping_summary/"
 files  <- grep(".tsv", list.files(PATH), value = T)
 
 summary.dt <- data.table()
@@ -351,8 +351,8 @@ plot_grid(all, matk, rbcl, nrow = 1, align = 'v', axis = 'lr')
 Linear regression, Table 3. This script processes tables where the median GC-content and the number of mismatches are calculated from local alignments of reads against the baits (data in the directory with mutli_mappings_summary.zip). The total number of baits equals the total number of alignments. The script summarizes this per taxonomic rank by calculating the mean GC-content and the median number of mismatches.
 
 ```{r}
-files <- grep("median_table.tsv", list.files("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/median_summary_tables/"), value = T)
-Path='/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/median_summary_tables/'
+files <- grep("median_table.tsv", list.files("path to median_summary_tables/"), value = T)
+Path='path to /median_summary_tables/'
 median_values.dt <- data.table()
 
 for(file in files){
@@ -390,8 +390,8 @@ summary_table.merged[, delta:=relative_proportion_capture-relative_proportion_sh
 summary_table.merged[, relative_change:=(relative_proportion_capture-relative_proportion_shotgun)/relative_proportion_shotgun ] 
 summary_table.merged <- summary_table.merged[relative_proportion_capture>0.005,]
 
-refs <- c(readDNAStringSet("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/matk_ref_no_primers.fasta"),
-               readDNAStringSet("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/rbcl_ref_no_primers.fasta"))
+refs <- c(readDNAStringSet("path to matk_ref_no_primers.fasta"),
+               readDNAStringSet("path to rbcl_ref_no_primers.fasta"))
 
 fragment_size <- data.frame(taxa=gsub("_", " ", gsub("_rbcl|_matk", "", str_split(refs@ranges@NAMES, " ", simplify = T)[,2])),
             marker=str_split(str_split(refs@ranges@NAMES, " ", simplify = T)[,2], "_", simplify = T)[,3],
