@@ -10,8 +10,6 @@ import math
 from Bio.Seq import Seq
 from Bio.SeqUtils import MeltingTemp as mt
 
-# this pyhthon script takes a bam produced by bowtie2 where reads and mapped to baits with --local(-sentisive) flag. It will find the largest ungabt part of the allignemnt to a bait and 
-
 parser = argparse.ArgumentParser(prog='parse mapping data to baits', description='This Python script processes a BAM file produced by Bowtie2, where reads are mapped to baits using the --local (--sensitive) flag. It finds the largest ungapped part of the alignment to a bait and calculates the GC-content, ignoring the mismatches. Use the --summarizing_output flag if you want to calculate a median over multiple mappings when Bowtie2 is used with -k >1. The script will produce a median value for each read.')
 parser.add_argument('--bam', "-b",  help='input bamfile', required=False)
 parser.add_argument('--output', "-o",  help='file name', required=False)
