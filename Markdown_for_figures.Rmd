@@ -1,0 +1,432 @@
+---
+title: "Scipts_for_figures_MS"
+author: "Kevin Nota"
+date: "2024-05-29"
+output: html_document
+---
+
+This will load the required packages and set up a ggplot theme used for the graphics.
+
+```{r}
+library(ggplot2)
+library(cowplot) 
+library(ggh4x)
+library(data.table)
+library(ggpubr)
+library(stringr)
+library(data.table)
+library(scales)
+library(ggrepel)
+library(Biostrings)
+library(stats)
+library(relaimpo)
+
+plot_theme <- theme(panel.background = element_rect(fill = "white", colour = "black", size=1.4),
+                    strip.background = element_blank(),
+                    panel.grid.minor = element_blank(),
+                    panel.grid.major = element_blank(), 
+                    strip.text = element_text(face = "bold", size = 12, angle = 0, hjust = 0.5, color = 'black'),
+                    strip.background.x = element_blank(),
+                    text = element_text(size = 12, color = 'black'),
+                    axis.text.x = element_text(size = 12, angle = 0, color = 'black'),
+                    axis.title = element_text(size=12, color = 'black'),
+                    axis.text.y = element_text(size=12, color = 'black'),
+                    plot.margin=unit(c(0,0,0,0), "cm"),
+                    legend.position = "top",
+                    legend.key = element_blank(),
+                    legend.text = element_text(size=12, color = 'black'),
+                    plot.title = element_text(hjust = 0.5, color = 'black'))
+
+path_to_file_dir='/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/ngsLCA_assignment/'
+```
+
+The code below generates Figure 2. It processes data from the directories 'ngsLCA_files.zip' and 'best_hit_mapping_summary.zip'. The script takes the .lca files produced by ngsLCA, extracting only the columns for readname, taxa, mix_id, marker, and read name. All samples are combined into a single dataset. Additional columns, such as read length, GC content bins, and dataset type (capture or shotgun), are then added. The data is summarized and plotted using ggplot.
+
+```{r}
+path = "/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/ngsLCA_assignment/"
+files <- grep("MIX.*.lca$", list.files(path), value = T)
+lca_table_total.dt = data.table()
+for( file in files){
+lca_file <- read.csv(paste(path, file, sep = ""), col.names = 1:35, sep = '\t', header = F, skip = 2)
+lca.dt <- data.table(query_sequence=str_split(lca_file$X1, ":", simplify = T)[,8], 
+                     taxa=str_split(lca_file$X2, ":", simplify = T)[,2],
+                     sample=str_split(file, "_", simplify = T)[,1],
+                     marker=str_split(file, "_", simplify = T)[,2],
+                     query_name=gsub(":[ATCG].*", "", lca_file[,1]))
+lca_table_total.dt <- rbind(lca_table_total.dt, lca.dt)
+}
+
+lca_table_total.dt[!sample %like% "C", dataset:="shotgun"]
+lca_table_total.dt[sample %like% "C", dataset:="capture"]
+
+
+bin_order=as.character()
+for( i in seq(20, 300,10)){
+ lca_table_total.dt[nchar(query_sequence)>=i & nchar(query_sequence)<=i+10, read_length_bin:=paste(i, i+10, sep = '-')]   
+ bin_order <- c(bin_order, paste(i, i+10, sep = '-'))
+}
+
+lca_table_capture <- lca_table_total.dt[dataset=='capture']
+
+lca_table_shotgun <- lca_table_total.dt[dataset=='shotgun']
+lca_table_capture <- lca_table_capture[sample(nrow(lca_table_capture),nrow(lca_table_shotgun), replace = F)]
+
+count_data_capture <- lca_table_capture[,.(capture=length(query_sequence)), by=read_length_bin]
+count_data_shotgun <- lca_table_shotgun[,.(shotgun=length(query_sequence)), by=read_length_bin]
+
+read_count_plot_data <- merge(count_data_capture, count_data_shotgun, by='read_length_bin')
+
+read_count_plot_data$read_length_bin <- factor(read_count_plot_data$read_length_bin, levels=bin_order)
+
+read_count_plot_data[,relative_change := (capture-shotgun)/shotgun]
+read_count_plot_data[,max_value := pmax(capture, shotgun)]
+
+lca_table_total.dt[,gc := str_count(query_sequence, ("G|C"))/nchar(query_sequence)]
+lca_table_total.dt$read_length_bin <- factor(lca_table_total.dt$read_length_bin, levels=bin_order)
+
+plot_data <- merge(lca_table_total.dt[dataset=='capture', .(mean_gc_capture=mean(gc)), by=read_length_bin],
+                   lca_table_total.dt[dataset=='shotgun', .(mean_gc_shotgun=mean(gc)), by=read_length_bin], by ='read_length_bin' )
+
+plot_data[,relative_change := (mean_gc_capture-mean_gc_shotgun)/mean_gc_shotgun]
+plot_data[,max_value := pmax(mean_gc_capture, mean_gc_shotgun)]
+
+bin_order=as.character()
+for( i in seq(0, 0.95,0.05)){
+ lca_table_total.dt[gc>=i & gc<=i+0.05, gc_bin:=paste(sprintf("%.2f", i),  sprintf("%.2f", i+0.05), sep = '-')]   
+ bin_order <- c(bin_order, paste(i, i+0.05, sep = '-'))
+}
+
+capture_resampled <- lca_table_total.dt[dataset=='capture'][sample(nrow(lca_table_total.dt[dataset=='capture']), nrow(lca_table_total.dt[dataset=='shotgun']))]
+
+GC_read_shotgun <- merge(lca_table_total.dt[dataset=='shotgun', .(shotgun_read_count=length(query_sequence)), by=gc_bin], capture_resampled[,.(capture_read_count=length(query_sequence)), by=gc_bin], by= 'gc_bin')
+
+GC_read_shotgun[,relative_change := (capture_read_count-shotgun_read_count)/shotgun_read_count]
+GC_read_shotgun[,max_value := pmax(capture_read_count, shotgun_read_count)]
+
+PATH="/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/best_hit_mapping_summary/"
+files  <- grep(".tsv", list.files(PATH), value = T)
+
+summary.dt <- data.table()
+for(file in files){
+  
+summary <- fread(paste(PATH, file, sep='' ))
+summary[,sample:=str_split(file, "_", simplify = T)[,1]]
+summary[,marker:=gsub(".tsv", "", str_split(file, "_", simplify = T)[,2])]
+summary.dt <- rbind(summary.dt,summary)
+}
+
+summary.dt[,lenght:=nchar(longest_match_sequence)]
+summary.dt[!sample %like% "C", dataset:="shotgun"]
+summary.dt[sample %like% "C", dataset:="capture"]
+
+bin_order=as.character()
+for( i in seq(0, 75, 5)){
+ summary.dt[lenght>i & lenght<=i+5, read_length_bin:=paste(i, i+5, sep = '-')]   
+ bin_order <- c(bin_order, paste(i, i+5, sep = '-'))
+
+ }
+
+best_hit_summary.dt <- summary.dt
+summary_shotgun.dt <- summary.dt[dataset=='shotgun']
+summary_capture.dt <- summary.dt[dataset=='capture'][sample(nrow(summary.dt[dataset=='capture']), nrow(summary_shotgun.dt), replace = F)]
+
+plot_data_merge <- na.omit(merge(summary_shotgun.dt[,.(count_lenght_shotgun=length(lenght)), by=read_length_bin],
+      summary_capture.dt[,.(count_lenght_capture=length(lenght)), by=read_length_bin], by='read_length_bin'))
+
+plot_data_merge[,relative_change := (count_lenght_capture-count_lenght_shotgun)/count_lenght_shotgun]
+plot_data_merge[,max_value := pmax(count_lenght_capture, count_lenght_shotgun)]
+
+
+read_lenght_plot <- ggplot()+plot_theme+coord_cartesian(clip = 'off')+
+  geom_col(data=read_count_plot_data, aes(read_length_bin, shotgun, fill="shotgun"), width = 0.4, just = 1, alpha=.5, col='black')+
+  geom_col(data=read_count_plot_data, aes(read_length_bin, capture, fill="capture"), width = 0.4, just = 0, alpha=.5, col='black')+
+  xlab("Read length bin")+ylab("Normalised read count")+
+  geom_text(data=read_count_plot_data, aes(x=read_length_bin, y=max_value+7350, label=paste(round(relative_change*100, digits=1), "%"), angle=45, hjust=0.5))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,50000), breaks = c(seq(5000, 45000, 5000)))+
+  scale_fill_manual(values = c('darkred','black')) + labs(fill = "Data set")+
+  theme(axis.text.x = element_text(angle=45, hjust = 1),plot.margin=unit(c(0.1,0.1,1,0.1), 'cm'),
+        panel.background=element_blank())+
+  geom_segment(aes(x=0.5, xend=28.5, y=0, yend=0), lineend = 'butt', size=0.6)+
+  geom_segment(aes(x=0, xend=0, y=5000, yend=45000), lineend = 'butt', size=0.6)+
+  geom_segment(data=read_count_plot_data, aes(x=read_length_bin, xend=read_length_bin, y=shotgun, yend=capture), size=1.5, arrow = arrow(type = 'closed', length = unit(0.35, "cm")))
+
+
+GC_plot <- ggplot()+plot_theme+coord_cartesian(clip = 'off')+
+  geom_col(data=GC_read_shotgun, aes(gc_bin, shotgun_read_count, fill='shotgun'), width = 0.4, just = 1, alpha=.5, col='black')+
+  geom_col(data=GC_read_shotgun, aes(gc_bin, capture_read_count, fill='capture'), width = 0.4, just = 0, alpha=.5, col='black')+
+  scale_y_continuous(expand = c(0,0), limits = c(0,90000), breaks = c(seq(10000, 80000, 10000)))+
+   scale_fill_manual(values = c('darkred','black')) + labs(fill = "Data set")+
+  geom_text(data=GC_read_shotgun, aes(x=gc_bin, y=max_value+6000, label=paste(round(relative_change*100, digits=1), "%"), angle=45, hjust=0.2))+
+  xlab("GC% bin")+ylab("Normalised read count")+
+   theme(axis.text.x = element_text(angle=45, hjust = 1), legend.position = "none",plot.margin=unit(c(0.1,0.1,0.1,0.1), 'cm'), panel.background=element_blank())+
+        #axis.line.x = element_line())+
+  geom_segment(aes(x=0, xend=0, y=10000, yend=80000), lineend = 'butt', size=0.6)+geom_segment(data=GC_read_shotgun, aes(x=gc_bin, xend=gc_bin, y=shotgun_read_count, yend=capture_read_count), size=1.5, arrow = arrow(type = 'closed', length = unit(0.25, "cm")))+
+  geom_segment(aes(x=0.5, xend=14.5, y=0, yend=0), lineend = 'butt', size=0.6)
+
+alignment_lenght_plot <- ggplot()+ plot_theme+
+  coord_cartesian(clip = 'off')+
+  geom_col(data=plot_data_merge, aes(read_length_bin, count_lenght_shotgun, fill='shotgun'), width = 0.4, just = 1, alpha=.5, col='black')+
+  geom_col(data=plot_data_merge, aes(read_length_bin, count_lenght_capture, fill='capture'), width = 0.4, just = 0, alpha=.5, col='black')+
+  scale_fill_manual(values = c('darkred','black')) + labs(fill = "Data set")+
+  geom_text(data=plot_data_merge, aes(x=read_length_bin, y=max_value+10000, label=paste(round(relative_change*100, digits=1), '%'), angle=45, hjust=0.2))+
+  xlab("Local alignment length bin")+ylab("Normalised read count")+
+  scale_y_continuous(expand = c(0,0), limits = c(0, 170000), breaks = c(seq(10000, 160000, 25000)))+
+  theme(axis.text.x = element_text(angle=45, hjust = 1), legend.position = "none", 
+        plot.margin=unit(c(0.1,1,0.1,0.1), 'cm'), panel.background=element_blank())+
+  geom_segment(aes(x=0, xend=0, y=10000, yend=160000), lineend = 'butt', size=0.6)+
+  geom_segment(data=plot_data_merge, aes(x=read_length_bin, xend=read_length_bin, y=count_lenght_shotgun, yend=count_lenght_capture), size=1.5, arrow = arrow(type = 'closed', length = unit(0.25, "cm")))+
+  geom_segment(aes(x=0.5, xend=12.5, y=0, yend=0), lineend = 'butt', size=0.6)
+
+plot_grid(read_lenght_plot, plot_grid(alignment_lenght_plot, GC_plot, align = 'h', axis = 'lr', rel_widths = c(1.5,2)), nrow = 2)
+```
+
+The code used for Figure 3 requires running the code for Figure 2 first, as some necessary files are generated in the preceding code block. The only additional data needed to run this code is a list of the baits in 'list_of_probes.txt'. This data is merged with the summary statistics of the reads mapped to the baits. It will calculate the proportion of matK and rbcL baits mapping, and it will also determine the number of reads mapping to the two markers before and after capture.
+
+```{r}
+lca_all_levels_merge_baits <- merge(summary.dt, lca_table_total.dt[,dataset:=NULL], by=c('query_sequence', 'marker', 'sample', 'query_name'), all=F)
+lca_all_levels_merge_baits[,id_score:=(1-NM/lenght)]
+
+plot_data_merged <- merge(lca_all_levels_merge_baits[dataset=='capture', 
+                                                .(capture_reads=length(unique(query_name))), by=c('taxa', 'marker')],  
+                          lca_all_levels_merge_baits[dataset=='shotgun', 
+                                                .(shotgun_reads=length(unique(query_name))), by=c('taxa', 'marker')])
+
+plot_data_merged[,capture_reads_relative := capture_reads/sum(capture_reads)]
+plot_data_merged[,shotgun_reads_relative := shotgun_reads/sum(shotgun_reads)]
+
+plot_data_merged[,relative_change := (capture_reads_relative-shotgun_reads_relative)/shotgun_reads_relative]
+
+path = "/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/mapped_reads2baits/"
+files <- grep("_probe_names.tsv", list.files(path), value = T)
+
+list_of_probes = fread("/Volumes/expressions/kevin_nota/001_capture_project/bait_validation/list_of_probes.txt", col.names = "probe_name")
+
+for(file in files){
+
+  data <- fread(paste(path, file, sep = ""), col.names = 'probe_name')  
+  data[,gsub("_probe_names.tsv", '', file):=1]
+  list_of_probes <- merge(list_of_probes, data, by='probe_name', all = T)
+}
+
+list_of_probes <- list_of_probes[, lapply(.SD, function(x) ifelse(is.na(x), 0, x))]
+
+list_of_probes_melt <- melt(list_of_probes, id.vars = 'probe_name')
+list_of_probes_melt[, mix := str_split(variable, "_", simplify = T)[,1]]
+list_of_probes_melt[, marker := str_split(variable, "_", simplify = T)[,2]]
+list_of_probes_melt[probe_name %like% 'rbcl', probe_marker := 'rbcl']
+list_of_probes_melt[probe_name %like% 'matk', probe_marker := 'matk']
+
+
+summary <- list_of_probes_melt[value!=0 & marker==probe_marker, length(probe_name), by=c('marker', 'mix', 'probe_marker')]
+
+summary[mix %like% 'C', dataset:="capture"]
+summary[!mix %like% 'C', dataset:="shotgun"]
+
+plot_summary <- summary[,mean(V1), by = c('dataset', 'marker')]
+plot_summary <- rbind(plot_summary, data.table(dataset='bait set', marker='rbcl', V1=856))
+plot_summary <- rbind(plot_summary, data.table(dataset='bait set', marker='matk', V1=3228))
+
+plot_summary$dataset <- factor(plot_summary$dataset, levels = c('bait set', 'shotgun', 'capture'))
+
+bait_set_props <- ggplot()+plot_theme+
+  geom_col(data=plot_summary, aes(dataset, V1, fill=marker), col='black')+
+  scale_y_continuous(expand = c(0,0), breaks = (seq(250, 4000, 750)), limits = c(0,4100))+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_manual(values = c('#0081ffff','black'))+
+  theme(panel.background = element_blank(),
+         plot.margin=unit(c(0.4,0.4,0.4,0.4), "cm"),
+        axis.text.x = element_text(angle=45, hjust = 1))+
+  geom_segment(aes(x=0.5, xend=0.5, y=250, yend=4000), col='black')+
+  ylab("Number of baits")+
+  xlab("")
+
+read_proportion <- rbind(
+      plot_data_merged[,.(read_count=sum(capture_reads), dataset='capture'), by='marker'],
+      plot_data_merged[,.(read_count=sum(shotgun_reads), dataset='shotgun'), by='marker'])
+
+read_proportion[,total_count:=sum(read_count), by='dataset']
+read_proportion[,relative_props:=read_count/total_count]
+
+read_proportion <- rbind(read_proportion,
+                         data.table(marker='matk', read_count=0, dataset='bait set', total_count=0, relative_props=3228/(3228+856)),
+                         data.table(marker='rbcl', read_count=0, dataset='bait set', total_count=0, relative_props=856/(3228+856)), fill=TRUE)
+
+read_proportion$dataset <- factor(read_proportion$dataset, levels = c('bait set', "shotgun", 'capture'))
+
+read_porps <-  ggplot()+plot_theme+
+  geom_col(data=read_proportion, aes(dataset, relative_props, fill=marker), col='black')+
+  scale_y_continuous(expand = c(0,0), breaks = (seq(0, 1, 0.2)), limits = c(0,1))+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_manual(values = c('#0081ffff','black'))+
+  theme(panel.background = element_blank(),
+         plot.margin=unit(c(0.4,0.4,0.4,0.4), "cm"),
+        axis.text.x = element_text(angle=45, hjust = 1))+
+  geom_segment(aes(x=0.5, xend=0.5, y=0, yend=1), col='black')+
+  ylab("Proporiton of reads")+
+  xlab("")
+
+plot_grid(bait_set_props, read_porps, align = 'h', axis = 'tb')
+
+
+```
+
+The code used for Figure 4 requires running the code for Figure 2 first, as some necessary files are generated in that code block. This code will calculate the relative abundance for each taxonomic rank and then produce correlations that are plotted.
+
+```{r}
+summary_table <- lca_table_total.dt[,.(read_count=as.numeric(length(query_name))),
+                                        by=c('marker', 'taxa', 'dataset')]
+
+summary_table[,sum:=sum(read_count), by=c("dataset")]
+summary_table[,relative_proportion:=read_count/sum]
+
+summary_table.merged <- merge(summary_table[dataset=='capture',],
+summary_table[dataset=='shotgun',], by = c("marker", 'taxa'))
+
+
+summary_table.merged[, delta:=relative_proportion_capture-relative_proportion_shotgun]
+summary_table.merged[, relative_change:=(relative_proportion_capture-relative_proportion_shotgun)/relative_proportion_shotgun ] 
+summary_table.merged <- summary_table.merged[relative_proportion_capture>0.005,]
+
+axis <- data.table(rbind(data.frame(x=0, xend=0, y=-0.01, yend=0.11, marker='matk'),
+      data.frame(x=0, xend=0, y=0.01, yend=0.09, marker='rbcl'),
+      data.frame(x=0.005, xend=0.065, y=-0.02, yend=-0.02, marker='matk'),
+      data.frame(x=0.005, xend=0.085, y=-0.01, yend=-0.01, marker='rbcl')))
+
+
+all <- ggplot()+plot_theme+
+  geom_segment( aes(x=0.006327398, xend=0.08184351, y=0.006327398, yend=0.08184351), linetype='dashed')+
+  geom_segment( aes(x=-0.001, xend=-0.001, y=0.005, yend=0.125), col='black')+
+  geom_segment(aes(x=0.005, xend=0.085, y=-0.01, yend=-0.01), col='black')+
+  theme(panel.background = element_blank())+
+  geom_smooth(data=summary_table.merged, aes(relative_proportion_shotgun, relative_proportion_capture), col='black', method = 'glm')+
+  stat_cor(data=summary_table.merged, aes(relative_proportion_shotgun, relative_proportion_capture))+
+  geom_text_repel(data=summary_table.merged, aes(relative_proportion_shotgun, relative_proportion_capture, label=taxa), size=3)+
+  scale_y_continuous(breaks = seq(0.005, 0.125, 0.02), expand = c(0,0))+
+  scale_x_continuous(expand = c(0,0), breaks = seq(0.005, 0.085, 0.02))+
+  geom_point(data=summary_table.merged, aes(relative_proportion_shotgun, relative_proportion_capture, shape=marker, fill=marker), size=3)+
+  scale_fill_manual(values = c('#0081ffff','black'))+
+  scale_shape_manual(values = c(21, 24))+
+  ylab('Relative proportion post capture') + 
+  xlab('')+
+    coord_cartesian(xlim = c(-0.001, 0.09), ylim = c(-0.01,0.13))
+ 
+ 
+  matk <- ggplot()+plot_theme+
+  geom_segment( aes(x=0.006327398, xend=0.06522722, y=0.006327398, yend=0.06522722), linetype='dashed')+
+  geom_segment(aes(x=0.005, xend=0.085, y=-0.01, yend=-0.01), col='black')+
+  theme(panel.background = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())+
+  geom_smooth(data=summary_table.merged[marker=='matk'], aes(relative_proportion_shotgun, relative_proportion_capture), col='black', method = 'glm')+
+  stat_cor(data=summary_table.merged[marker=='matk'], aes(relative_proportion_shotgun, relative_proportion_capture))+
+  geom_text_repel(data=summary_table.merged[marker=='matk'], aes(relative_proportion_shotgun, relative_proportion_capture, label=taxa), size=3)+
+  scale_y_continuous(breaks = seq(0.0, 0.12, 0.02), expand = c(0,0))+
+  scale_x_continuous(expand = c(0,0), breaks = seq(0.005, 0.085, 0.02))+
+  geom_point(data=summary_table.merged[marker=='matk'], aes(relative_proportion_shotgun, relative_proportion_capture, shape=marker), fill= '#0081ffff' ,shape= 24, size=3)+
+  ylab('') + 
+  xlab('Relative proportion shotgun')+
+    coord_cartesian(xlim = c(-0.001, 0.09), ylim = c(-0.01,0.13))
+  
+  
+  rbcl <- ggplot()+plot_theme+
+  geom_segment( aes(x=0.007298123, xend=0.08184351, y=0.007298123, yend=0.08184351), linetype='dashed')+
+  geom_segment(aes(x=0.005, xend=0.085, y=-0.01, yend=-0.01), col='black')+
+  theme(panel.background = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())+
+  geom_smooth(data=summary_table.merged[marker=='rbcl'], aes(relative_proportion_shotgun, relative_proportion_capture), col='black', method = 'glm')+
+  stat_cor(data=summary_table.merged[marker=='rbcl'], aes(relative_proportion_shotgun, relative_proportion_capture))+
+  geom_text_repel(data=summary_table.merged[marker=='rbcl'], aes(relative_proportion_shotgun, relative_proportion_capture, label=taxa), size=3)+
+  scale_y_continuous(breaks = seq(0.0, 0.12, 0.02), expand = c(0,0))+
+  scale_x_continuous(expand = c(0,0), breaks = seq(0.005, 0.085, 0.02))+
+  geom_point(data=summary_table.merged[marker=='rbcl'], aes(relative_proportion_shotgun, relative_proportion_capture), fill= 'black' ,shape= 21,  size=3)+
+  ylab('') + 
+  xlab('')+
+    coord_cartesian(xlim = c(-0.001, 0.09), ylim = c(-0.01,0.13))
+  
+plot_grid(all, matk, rbcl, nrow = 1, align = 'v', axis = 'lr')
+    
+```
+
+Linear regression, Table 3. This script processes tables where the median GC-content and the number of mismatches are calculated from local alignments of reads against the baits (data in the directory with mutli_mappings_summary.zip). The total number of baits equals the total number of alignments. The script summarizes this per taxonomic rank by calculating the mean GC-content and the median number of mismatches.
+
+```{r}
+files <- grep("median_table.tsv", list.files("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/median_summary_tables/"), value = T)
+Path='/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/read2baits/median_summary_tables/'
+median_values.dt <- data.table()
+
+for(file in files){
+ median_values <- fread(paste(Path, file, sep = ''))
+ median_values[,sample:=gsub("_.*", "", file)]
+ median_values.dt <- rbind(median_values.dt, median_values)
+ 
+}
+
+median_values.dt[sample %like% "C",dataset:='capture']
+median_values.dt[!sample %like% "C",dataset:='shotgun']
+
+median_values_taxon.dt <- merge(lca_table_total.dt[,sample:=NULL], median_values.dt[,dataset:=NULL], by  ='query_name')
+
+summary_table <- median_values_taxon.dt[, .(mean_gc=as.numeric(mean(gc_content_mismatch)), 
+                                            mean_mismatch_count=as.numeric(mean(mismatch_count)),
+                                            mean_probes=as.numeric(mean(number_of_probes)),
+                                            mean_NM=as.numeric(median(NM)),
+                                            read_count=as.numeric(length(query_name))), 
+                                            by=c('marker', 'taxa', 'dataset')]
+
+summary_table[,sum:=sum(read_count), by=c("dataset")]
+summary_table[,relative_proportion:=read_count/sum]
+
+summary_table.merged <- merge(summary_table[dataset=='capture',],
+summary_table[dataset=='shotgun',], by = c("marker", 'taxa'))
+
+
+colnames(summary_table.merged ) <- gsub("\\.x", "_capture", colnames(summary_table.merged ) )
+colnames(summary_table.merged ) <- gsub("\\.y", "_shotgun", colnames(summary_table.merged ) )
+summary_table.merged[,c('sum_shotgun', 'sum_capture','dataset_shotgun', 'dataset_capture'):=NULL]
+
+
+summary_table.merged[, delta:=relative_proportion_capture-relative_proportion_shotgun]
+summary_table.merged[, relative_change:=(relative_proportion_capture-relative_proportion_shotgun)/relative_proportion_shotgun ] 
+summary_table.merged <- summary_table.merged[relative_proportion_capture>0.005,]
+
+refs <- c(readDNAStringSet("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/matk_ref_no_primers.fasta"),
+               readDNAStringSet("/Volumes/expressions/kevin_nota/001_capture_project/data_analysis_11JAN22/rbcl_ref_no_primers.fasta"))
+
+fragment_size <- data.frame(taxa=gsub("_", " ", gsub("_rbcl|_matk", "", str_split(refs@ranges@NAMES, " ", simplify = T)[,2])),
+            marker=str_split(str_split(refs@ranges@NAMES, " ", simplify = T)[,2], "_", simplify = T)[,3],
+           capture_length=nchar(refs))
+
+
+summary_table.merged_size = merge(summary_table.merged, fragment_size, by=c('marker', 'taxa'), all=T)
+summary_table.merged_size[is.na(capture_length), capture_length:=0]
+
+
+#############    all linear regression    #############
+model_subset <- lm(delta ~ mean_probes_shotgun + mean_gc_shotgun + mean_NM_shotgun +relative_proportion_shotgun + capture_length, data = summary_table.merged_size)
+subset_model <- stepAIC(model_subset, direction="both", steps = 10000)
+summary(subset_model)
+
+best_model <- lm(delta ~ capture_length + mean_NM_shotgun + mean_probes_shotgun, data = summary_table.merged_size)
+rel_importance <- calc.relimp(best_model, type = c("lmg"), rela = TRUE)
+
+
+#############    matK linear regression    #############
+model_subset <- lm(delta ~ mean_probes_shotgun + mean_gc_shotgun + mean_NM_shotgun +relative_proportion_shotgun + capture_length, data = summary_table.merged_size['matk'])
+subset_model <- stepAIC(model_subset, direction="both", steps = 10000)
+summary(subset_model)
+
+best_model <- lm(delta ~ mean_probes_shotgun + mean_gc_shotgun + mean_NM_shotgun +relative_proportion_shotgun + capture_length, data = summary_table.merged_size['matk'])
+rel_importance <- calc.relimp(best_model, type = c("lmg"), rela = TRUE)
+
+#############    rbcl linear regression    #############
+model_subset <- lm(delta ~ mean_probes_shotgun + mean_gc_shotgun + mean_NM_shotgun +relative_proportion_shotgun + capture_length, data = summary_table.merged_size['rbcl'])
+subset_model <- stepAIC(model_subset, direction="both", steps = 10000)
+summary(subset_model)
+
+best_model <- lm(delta ~ mean_probes_shotgun + mean_gc_shotgun , data = summary_table.merged_size['rbcl'])
+rel_importance <- calc.relimp(best_model, type = c("lmg"), rela = TRUE)
+
+```
+
+
