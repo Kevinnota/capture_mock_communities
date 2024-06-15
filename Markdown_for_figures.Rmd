@@ -5,7 +5,7 @@ date: "2024-05-29"
 output: html_document
 ---
 
-This will load the required packages and set up a ggplot theme used for the graphics.
+This code block will load the required packages and set up a ggplot theme used for the graphics.
 
 ```{r}
 library(ggplot2)
