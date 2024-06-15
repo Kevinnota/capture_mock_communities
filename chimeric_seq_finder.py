@@ -4,7 +4,7 @@ import argparse
 from tqdm import tqdm
 import pysam
 
-parser = argparse.ArgumentParser(prog='mapping summary', description='This tool will look for chimeric sequences in a quick and dirty way. It examines local alignments to determine if a read is mapping partially to two or more reference sequences, with one part in the reverse direction and another part in the forward direction. It then prints a summary with three identity scores over the whole sample.')
+parser = argparse.ArgumentParser(prog='mapping summary', description='This tool will look for chimeric sequences in a quick and dirty way. It examines local alignments to determine if a read is mapping partially to two or more reference sequences, with one part in the reverse direction and another part in the forward direction. It then prints a summary with three identity scores over the whole sample. Don't use this for detecting chimerics sequences in complex samples')
 parser.add_argument('--bam', "-b",  help='input bam from Bowtie2 local alignment with -k>2')
 parser.add_argument('--print', "-p", action='store_true', help='print a nice output for the terminal, keep false for loops and making tables', default=True)
 args=parser.parse_args()
